@@ -1,0 +1,259 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RadarSpot Binance</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101722;color:#e8edf5;font-family:Arial,sans-serif}
+header{background:#172638;padding:20px;border-bottom:2px solid #2879ce}
+h1{margin:0;color:#54a8ff;font-size:25px}
+.sub{color:#aab8c9;margin-top:7px;font-size:13px}
+main{padding:14px;max-width:1000px;margin:auto}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.stat,.panel{background:#1b293a;padding:15px;border-radius:10px;margin-bottom:12px}
+.stat strong{display:block;font-size:23px;margin-top:7px}
+.stat small,.muted{color:#aab8c9}
+button,select{background:#246fc0;color:white;border:0;padding:12px;border-radius:7px;font-size:14px}
+button:disabled{opacity:.5}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:11px 7px;text-align:left;border-bottom:1px solid #354356}
+th{color:#9eb6d2}
+.buy{color:#42df9a;font-weight:bold}
+.sell{color:#ff7777;font-weight:bold}
+.watch{color:#ffc45c;font-weight:bold}
+.signal{font-size:11px}
+#status{color:#69baff;margin:12px 0}
+.note{font-size:12px;color:#aab8c9;line-height:1.6}
+@media(max-width:500px){
+ table{font-size:10px}
+ th,td{padding:9px 3px}
+}
+</style>
+</head>
+<body>
+<header>
+<h1>RADARSPOT</h1>
+<div class="sub">BINANCE SPOT | RADAR INTELIGENTE</div>
+</header>
+<main>
+<div class="stats">
+<div class="stat"><small>Moedas analisadas</small><strong id="total">0</strong></div>
+<div class="stat"><small>Possíveis compras</small><strong id="buys" class="buy">0</strong></div>
+<div class="stat"><small>Alertas de queda</small><strong id="sells" class="sell">0</strong></div>
+<div class="stat"><small>Última atualização</small><strong id="clock" style="font-size:15px">--:--</strong></div>
+</div>
+
+<div class="panel">
+<strong>CONTROLE DO RADAR</strong>
+<div class="controls">
+<button onclick="scan()" id="scanBtn">ATUALIZAR RADAR</button>
+<select id="filter" onchange="render()">
+<option value="ALL">Todos os sinais</option>
+<option value="BUY">Possível compra</option>
+<option value="SELL">Alerta de queda</option>
+<option value="WATCH">Em observação</option>
+</select>
+</div>
+<div id="status">Aguardando início da análise...</div>
+</div>
+
+<div class="panel">
+<strong>OPORTUNIDADES SPOT</strong>
+<div style="overflow-x:auto">
+<table>
+<thead><tr>
+<th>MOEDA</th><th>PREÇO</th><th>RSI</th>
+<th>MACD</th><th>VOLUME</th><th>SINAL</th>
+</tr></thead>
+<tbody id="results">
+<tr><td colspan="6">Aguardando análise...</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="panel">
+<strong>CRITÉRIOS DE ANÁLISE</strong>
+<p class="note">
+RSI 10–30: sobrevenda e possível reversão.
+<br>RSI 30–70: região intermediária.
+<br>RSI 70–90: sobrecompra e possível enfraquecimento.
+<br>RSI acima de 90: sobrecompra extrema.
+<br><br>
+Os sinais são confirmados por MACD, volume,
+médias móveis e candles. Nenhuma operação
+é executada automaticamente.
+</p>
+</div>
+<div class="panel">
+<strong>AVISO DE RISCO</strong>
+<p class="note">Este radar é uma ferramenta de análise técnica.
+Os sinais não garantem lucro. Confirme os gráficos,
+a liquidez e o risco antes de qualquer operação.
+Utiliza dados públicos da Binance Spot.
+</p>
+</div>
+</main>
+<script>
+const API="https://api.binance.com";
+let rows=[];
+
+async function get(url){
+ const r=await fetch(API+url);
+ if(!r.ok)throw Error("Erro Binance "+r.status);
+ return r.json();
+}
+
+function ema(values,period){
+ let k=2/(period+1);
+ let result=values[0];
+ for(let i=1;i<values.length;i++)
+ result=values[i]*k+result*(1-k);
+ return result;
+}
+
+function rsi(values){
+ let gains=0,losses=0;
+ for(let i=values.length-15;i<values.length-1;i++){
+ let d=values[i+1]-values[i];
+ if(d>0)gains+=d;
+ else losses-=d;
+ }
+ let avgG=gains/14,avgL=losses/14;
+ if(avgL===0)return 100;
+ return 100-(100/(1+avgG/avgL));
+}
+
+async function analyze(symbol){
+ const candles=await get(
+ "/api/v3/klines?symbol="+symbol+"&interval=15m&limit=60"
+ );
+ const close=candles.map(c=>Number(c[4]));
+ const volumes=candles.map(c=>Number(c[5]));
+ const last=close[close.length-1];
+ const previous=close[close.length-2];
+ const currentRSI=rsi(close);
+ const e20=ema(close.slice(-35),20);
+ const e50=ema(close.slice(-50),50);
+
+ const diffs=[];
+ for(let i=25;i<close.length;i++){
+ const part=close.slice(0,i+1);
+ diffs.push(ema(part,12)-ema(part,26));
+ }
+ const macd=ema(diffs.slice(-9),9);
+ const macdNow=diffs[diffs.length-1];
+ const macdPrev=diffs[diffs.length-2];
+
+ const avgVol=volumes.slice(-21,-1)
+ .reduce((a,b)=>a+b,0)/20;
+ const volumeOK=volumes[volumes.length-1]>avgVol*1.2;
+ const bullish=last>previous;
+ const macdUp=macdNow>macd;
+ const cross=macdPrev<=macd && macdNow>macd;
+ const bearish=macdNow<macd && last<previous;
+
+ let signal="WATCH";
+ let reason="Aguardando confirmação";
+
+ if(currentRSI<=30 && macdUp && volumeOK && bullish && last>e20){
+ signal="BUY";
+ reason="Sobrevenda com confirmação";
+ }
+ else if(currentRSI>=90 || (currentRSI>=70 && bearish)){
+ signal="SELL";
+ reason="Sobrecompra / enfraquecimento";
+ }
+ else if(currentRSI<=30){
+ reason="Sobrevenda sem confirmação completa";
+ }
+ else if(cross && volumeOK && last>e20){
+ reason="MACD cruzando para cima";
+ }
+ else if(last<e20 && macdNow<macd){
+ reason="Pressão de baixa";
+ }
+
+ return {
+ symbol,last,rsi:currentRSI,macd:macdUp?"Alta":"Baixa",
+ volume:volumeOK?"Forte":"Normal",
+ signal,reason
+ };
+}
+
+async function scan(){
+ const btn=document.getElementById("scanBtn");
+ btn.disabled=true;
+ document.getElementById("status").textContent="Buscando moedas na Binance...";
+ try{
+ const tickers=await get("/api/v3/ticker/24hr");
+ const selected=tickers
+ .filter(t=>t.symbol.endsWith("USDT") &&
+ Number(t.quoteVolume)>1000000)
+ .sort((a,b)=>Number(b.quoteVolume)-Number(a.quoteVolume))
+ .slice(0,30);
+
+ rows=[];
+ let done=0;
+ const queue=[...selected];
+ async function worker(){
+ while(queue.length){
+ const item=queue.shift();
+ try{
+ const result=await analyze(item.symbol);
+ rows.push(result);
+ }catch(e){}
+ done++;
+ document.getElementById("status").textContent=
+ "Analisando moedas: "+done+"/"+selected.length;
+ render();
+ }
+ }
+ await Promise.all(Array.from({length:4},worker));
+ render();
+ document.getElementById("clock").textContent=
+ new Date().toLocaleTimeString("pt-BR");
+ document.getElementById("status").textContent=
+ "Análise concluída: "+rows.length+" moedas.";
+ }catch(e){
+ document.getElementById("status").textContent=
+ "Falha na conexão. Tente novamente. "+e.message;
+ }
+ btn.disabled=false;
+}
+
+function render(){
+ const filter=document.getElementById("filter").value;
+ const data=rows.filter(r=>filter==="ALL"||r.signal===filter);
+ document.getElementById("total").textContent=rows.length;
+ document.getElementById("buys").textContent=
+ rows.filter(r=>r.signal==="BUY").length;
+ document.getElementById("sells").textContent=
+ rows.filter(r=>r.signal==="SELL").length;
+
+ document.getElementById("results").innerHTML=
+ data.map(r=>{
+ let cls=r.signal==="BUY"?"buy":
+ r.signal==="SELL"?"sell":"watch";
+ let label=r.signal==="BUY"?"POSSÍVEL COMPRA":
+ r.signal==="SELL"?"ALERTA":"OBSERVAR";
+ return `<tr>
+ <td><b>${r.symbol}</b></td>
+ <td>${r.last.toPrecision(7)}</td>
+ <td>${r.rsi.toFixed(1)}</td>
+ <td>${r.macd}</td>
+ <td>${r.volume}</td>
+ <td class="${cls} signal">${label}</td>
+ </tr>`;
+ }).join("")||'<tr><td colspan="6">Nenhum resultado.</td></tr>';
+}
+
+scan();
+setInterval(scan,300000);
+</script>
+</body>
+</html>
